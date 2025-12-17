@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CEC 2020 Benchmark Visualizer</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Plotly.js for 3D Graphing -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <!-- MathJax for rendering formulas -->
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .function-card {
+            transition: all 0.2s;
+        }
+
+        .function-card:hover {
+            background-color: #f3f4f6;
+            cursor: pointer;
+        }
+
+        .function-card.active {
+            background-color: #e0e7ff;
+            border-left: 4px solid #4f46e5;
+        }
+
+        /* Custom scrollbar for function list */
+        .scroller::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .scroller::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        .scroller::-webkit-scrollbar-thumb {
+            background: #c7c7c7;
+            border-radius: 3px;
+        }
+
+        .scroller::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-50 h-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-gray-200 px-6 py-4 flex-none z-10 shadow-sm">
+        <h1 class="text-2xl font-bold text-gray-800">CEC 2020 Benchmark Visualizer</h1>
+        <p class="text-sm text-gray-500">Single Objective Bound Constrained Numerical Optimization</p>
+    </header>
+
+    <!-- Main Content -->
+    <div class="flex flex-1 overflow-hidden">
+
+        <!-- Sidebar: Function List -->
+        <aside
+            class="w-80 bg-white border-r border-gray-200 flex flex-col flex-none z-10 shadow-lg md:shadow-none absolute md:relative h-full transition-transform transform -translate-x-full md:translate-x-0"
+            id="sidebar">
+            <div class="p-4 border-b border-gray-100 bg-gray-50">
+                <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Function List</h2>
+            </div>
+            <div class="flex-1 overflow-y-auto scroller p-2 space-y-1" id="functionList">
+                <!-- Functions will be injected here by JS -->
+            </div>
+        </aside>
+
+        <!-- Toggle Button for Mobile -->
+        <button id="menuBtn" class="md:hidden absolute top-4 right-4 z-50 bg-indigo-600 text-white p-2 rounded shadow">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16">
+                </path>
+            </svg>
+        </button>
+
+        <!-- Visualization Area -->
+        <main class="flex-1 flex flex-col relative overflow-hidden">
+
+            <!-- Info Panel -->
+            <div
+                class="bg-white/90 backdrop-blur-sm border-b border-gray-200 p-4 absolute top-0 left-0 right-0 z-10 shadow-sm">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <h2 id="funcTitle" class="text-xl font-bold text-indigo-700">Select a Function</h2>
+                        <span id="funcType"
+                            class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 mt-1">
+                            Type
+                        </span>
+                    </div>
+                    <div class="text-right hidden sm:block">
+                        <div class="text-xs text-gray-500">Bounds</div>
+                        <div id="funcBounds" class="font-mono text-sm text-gray-700">[-100, 100]</div>
+                    </div>
+                </div>
+                <div id="funcDesc" class="mt-2 text-sm text-gray-600 max-w-3xl">
+                    Select a function from the sidebar to visualize its 3D landscape.
+                </div>
+                <div id="funcFormula"
+                    class="mt-2 text-sm text-gray-800 font-mono bg-gray-50 p-2 rounded border border-gray-200 overflow-x-auto">
+                    $$ f(x) = ... $$
+                </div>
+            </div>
+
+            <!-- Plot Container -->
+            <div id="plotDiv" class="w-full h-full bg-gray-50 pt-32"></div>
+
+            <!-- Loading Indicator -->
+            <div id="loader" class="absolute inset-0 flex items-center justify-center bg-white/80 z-20 hidden">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // --- Data & Logic ---
+
+        const functions = [
+            {
+                id: 'F1',
+                name: "Shifted and Rotated Bent Cigar",
+                type: "Unimodal",
+                bounds: [-100, 100],
+                desc: "A unimodal function with a narrow ridge. It is separable but rotated in CEC benchmarks to introduce dependencies between variables. It tests the algorithm's ability to follow narrow valleys.",
+                formula: "f(\\mathbf{x}) = x_1^2 + 10^6 \\sum_{i=2}^D x_i^2",
+                fn: (x, y) => {
+                    // Simplification: Standard Bent Cigar
+                    return x * x + 1e6 * y * y;
+                }
+            },
+            {
+                id: 'F2',
+                name: "Shifted and Rotated Schwefel",
+                type: "Basic",
+                bounds: [-500, 500], // Schwefel standard bounds
+                desc: "A complex multimodal function with many local minima. The global minimum is distant from the next best local minima, making it deceptive. The surface is filled with peaks and valleys.",
+                formula: "f(\\mathbf{x}) = 418.9829D - \\sum_{i=1}^D x_i \\sin(\\sqrt{|x_i|})",
+                fn: (x, y) => {
+                    const term1 = x * Math.sin(Math.sqrt(Math.abs(x)));
+                    const term2 = y * Math.sin(Math.sqrt(Math.abs(y)));
+                    return 418.9829 * 2 - (term1 + term2);
+                }
+            },
+            {
+                id: 'F3',
+                name: "Shifted and Rotated Lunacek bi-Rastrigin",
+                type: "Basic",
+                bounds: [-10, 10], // Visualizes better in smaller range
+                desc: "A 'double funnel' function. It constructs two funnels (basins of attraction), one containing the global optimum and the other a deceptive local optimum. It tests the ability to escape the deceptive funnel.",
+                formula: "f(\\mathbf{x}) = \\text{min}(\\dots) + 10(D - \\sum \\cos(2\\pi z_i))",
+                fn: (x, y) => {
+                    // Approximation of Lunacek structure: Double funnel + Rastrigin noise
+                    // Simplified Double Sphere + Rastrigin
+                    const r = (val) => val * val - 10 * Math.cos(2 * Math.PI * val) + 10;
+
+                    // Two centers
+                    const mu1 = 2.5;
+                    const mu2 = -2.5;
+                    const d1 = (x - mu1) ** 2 + (y - mu1) ** 2;
+                    const d2 = (x - mu2) ** 2 + (y - mu2) ** 2 + 10; // Deceptive trap
+
+                    // Combined Global structure + Rastrigin local structure
+                    const globalStruct = Math.min(d1, d2);
+                    const localStruct = 10 * (2 - Math.cos(2 * Math.PI * (x - mu1)) - Math.cos(2 * Math.PI * (y - mu1)));
+
+                    return globalStruct + localStruct;
+                }
+            },
+            {
+                id: 'F4',
+                name: "Expanded Rosenbrock’s plus Griewank’s",
+                type: "Basic",
+                bounds: [-10, 10],
+                desc: "A combination where the Rosenbrock function acts as a base, wrapped inside the Griewank function. It creates a curved valley (Rosenbrock) with a rugged surface (Griewank).",
+                formula: "f(\\mathbf{x}) = f_{Griewank}(f_{Rosenbrock}(\\mathbf{x}))",
+                fn: (x, y) => {
+                    // Rosenbrock part
+                    const rosen = 100 * (y - x * x) ** 2 + (1 - x) ** 2;
+                    // Griewank applied to Rosenbrock output (Conceptual approximation for 2D vis)
+                    // Actually F4 is sum of F_griewank(F_rosen(pair)).
+                    // Let's visualize Standard Rosenbrock + Noise to simulate the ruggedness
+                    return rosen + (rosen * rosen) / 4000 - Math.cos(rosen) + 1;
+                }
+            },
+            {
+                id: 'F5',
+                name: "Hybrid Function 1 (N=3)",
+                type: "Hybrid",
+                bounds: [-50, 50],
+                desc: "Combines three different basic functions (e.g., Schwefel, Rastrigin, Elliptic) acting on different subsets of variables. Visualized here as a blend of distinct textures.",
+                formula: "\\text{Hybrid of Schwefel, Rastrigin, Elliptic}",
+                fn: (x, y) => {
+                    // Conceptual Hybrid: X axis dominated by Schwefel, Y by Rastrigin
+                    const s = 418.9829 - x * Math.sin(Math.sqrt(Math.abs(x)));
+                    const r = y * y - 10 * Math.cos(2 * Math.PI * y) + 10;
+                    return s + r;
+                }
+            },
+            {
+                id: 'F6',
+                name: "Hybrid Function 2 (N=4)",
+                type: "Hybrid",
+                bounds: [-50, 50],
+                desc: "A hybrid of four basic functions (e.g., Escaffer, HGBat, Rosenbrock, Modified Schwefel). Creates a highly irregular landscape with varying properties along different dimensions.",
+                formula: "\\text{Hybrid of Escaffer, HGBat, Rosenbrock, Schwefel}",
+                fn: (x, y) => {
+                    // Conceptual: HGBat + Rosenbrock
+                    const hgbat = Math.pow((x * x + y * y - (x + y)), 2) + Math.pow((x * x + y * y - (x + y)), 2) / 100; // Simplified
+                    const rosen = 100 * (y - x * x) ** 2 + (1 - x) ** 2;
+                    return 0.5 * hgbat + 0.5 * rosen;
+                }
+            },
+            {
+                id: 'F7',
+                name: "Hybrid Function 3 (N=5)",
+                type: "Hybrid",
+                bounds: [-100, 100],
+                desc: "A hybrid of five functions. It tests the solver's ability to handle heterogeneous landscapes where no single strategy works for all variables.",
+                formula: "\\text{Hybrid (N=5): Katsuura, Ackley, etc.}",
+                fn: (x, y) => {
+                    // Conceptual: Ackley dominant + Noise
+                    const term1 = -20 * Math.exp(-0.2 * Math.sqrt(0.5 * (x * x + y * y)));
+                    const term2 = -Math.exp(0.5 * (Math.cos(2 * Math.PI * x) + Math.cos(2 * Math.PI * y)));
+                    const ackley = term1 + term2 + 20 + Math.E;
+                    // Add Katsuura-like noise
+                    const noise = Math.abs(x * y) / 1000;
+                    return ackley + noise;
+                }
+            },
+            {
+                id: 'F8',
+                name: "Composition Function 1 (N=3)",
+                type: "Composition",
+                bounds: [-100, 100],
+                desc: "Merges three basic functions (e.g., Rosenbrock, Elliptic, Rastrigin) centered at different locations. You should see distinct 'basins' or shapes in different areas of the graph.",
+                formula: "f(\\mathbf{x}) = \\sum w_i \\cdot (f_i(\\mathbf{x} - o_i) + bias_i)",
+                fn: (x, y) => {
+                    // 3 peaks composition
+                    // 1. Sphere at -50, -50
+                    const d1 = (x + 50) ** 2 + (y + 50) ** 2;
+                    const f1 = d1;
+                    const w1 = Math.exp(-d1 / 2000);
+
+                    // 2. Rastrigin at 0,0
+                    const f2 = x * x - 10 * Math.cos(2 * Math.PI * x) + 10 + y * y - 10 * Math.cos(2 * Math.PI * y) + 10;
+                    const d2 = x * x + y * y;
+                    const w2 = Math.exp(-d2 / 2000);
+
+                    // 3. Griewank at 50, 50
+                    const f3 = (d1 / 4000) - Math.cos(x) * Math.cos(y) + 1;
+                    const d3 = (x - 50) ** 2 + (y - 50) ** 2;
+                    const w3 = Math.exp(-d3 / 2000);
+
+                    // Normalize weights (simplified)
+                    const sumW = w1 + w2 + w3 + 1e-9;
+                    return (w1 * f1 + w2 * f2 + w3 * f3) / sumW;
+                }
+            },
+            {
+                id: 'F9',
+                name: "Composition Function 2 (N=4)",
+                type: "Composition",
+                bounds: [-100, 100],
+                desc: "Composition of four functions. Increases the complexity of the global structure. The algorithm must locate the correct basin among several deceptive ones.",
+                formula: "\\text{Composition (N=4)}",
+                fn: (x, y) => {
+                    // 2 dominant basins
+                    const d1 = (x - 40) ** 2 + (y - 40) ** 2;
+                    const d2 = (x + 40) ** 2 + (y + 40) ** 2;
+
+                    // Basin 1: Smooth
+                    const f1 = d1;
+
+                    // Basin 2: Rugged (Schwefel-like)
+                    const f2 = 418.9829 * 2 - ((x + 40) * Math.sin(Math.sqrt(Math.abs(x + 40))) + (y + 40) * Math.sin(Math.sqrt(Math.abs(y + 40))));
+
+                    const w1 = Math.exp(-d1 / 2000);
+                    const w2 = Math.exp(-d2 / 2000);
+
+                    return (w1 * f1 + w2 * (f2 + 100)) / (w1 + w2 + 1e-9);
+                }
+            },
+            {
+                id: 'F10',
+                name: "Composition Function 3 (N=5)",
+                type: "Composition",
+                bounds: [-100, 100],
+                desc: "The most complex function in the suite. Composition of five functions. Features a highly multimodal landscape with complex shifting and rotation.",
+                formula: "\\text{Composition (N=5)}",
+                fn: (x, y) => {
+                    // A messy landscape
+                    const ackley = -20 * Math.exp(-0.2 * Math.sqrt(0.5 * (x * x + y * y))) - Math.exp(0.5 * (Math.cos(2 * Math.PI * x) + Math.cos(2 * Math.PI * y))) + 20 + Math.E;
+                    // Add a global slope/bias to make it composition-like
+                    return ackley + (x + y) / 10 + Math.sin(x / 5) * 20;
+                }
+            }
+        ];
+
+        // --- DOM Elements ---
+        const functionList = document.getElementById('functionList');
+        const plotDiv = document.getElementById('plotDiv');
+        const funcTitle = document.getElementById('funcTitle');
+        const funcType = document.getElementById('funcType');
+        const funcDesc = document.getElementById('funcDesc');
+        const funcFormula = document.getElementById('funcFormula');
+        const funcBounds = document.getElementById('funcBounds');
+        const loader = document.getElementById('loader');
+        const menuBtn = document.getElementById('menuBtn');
+        const sidebar = document.getElementById('sidebar');
+
+        let currentFunction = functions[0];
+
+        // --- Init Function List ---
+        function renderList() {
+            functionList.innerHTML = '';
+            functions.forEach(f => {
+                const div = document.createElement('div');
+                div.className = `function-card p-3 rounded-lg border border-gray-100 mb-2 ${f.id === currentFunction.id ? 'active' : ''}`;
+
+                // Badge Color Logic
+                let badgeColor = 'bg-gray-100 text-gray-600';
+                if (f.type === 'Unimodal') badgeColor = 'bg-blue-100 text-blue-700';
+                if (f.type === 'Basic') badgeColor = 'bg-green-100 text-green-700';
+                if (f.type === 'Hybrid') badgeColor = 'bg-purple-100 text-purple-700';
+                if (f.type === 'Composition') badgeColor = 'bg-orange-100 text-orange-700';
+
+                div.innerHTML = `
+                <div class="flex justify-between items-center mb-1">
+                    <span class="font-bold text-gray-700 text-sm">${f.id}</span>
+                    <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${badgeColor}">${f.type}</span>
+                </div>
+                <div class="text-xs text-gray-500 truncate">${f.name}</div>
+            `;
+                div.onclick = () => selectFunction(f);
+                functionList.appendChild(div);
+            });
+        }
+
+        function selectFunction(f) {
+            currentFunction = f;
+            renderList();
+            updateInfo();
+            generatePlot();
+            // Close mobile menu if open
+            sidebar.classList.add('-translate-x-full');
+            sidebar.classList.remove('translate-x-0');
+        }
+
+        function updateInfo() {
+            funcTitle.innerText = `${currentFunction.id}: ${currentFunction.name}`;
+            funcType.innerText = currentFunction.type;
+            funcDesc.innerText = currentFunction.desc;
+            funcBounds.innerText = `[${currentFunction.bounds[0]}, ${currentFunction.bounds[1]}]`;
+
+            // Update Formula MathJax
+            funcFormula.innerText = `$$ ${currentFunction.formula} $$`;
+            if (window.MathJax) {
+                MathJax.typesetPromise([funcFormula]);
+            }
+
+            // Update Type Badge Color
+            funcType.className = "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium mt-1 ";
+            if (currentFunction.type === 'Unimodal') funcType.classList.add('bg-blue-100', 'text-blue-800');
+            else if (currentFunction.type === 'Basic') funcType.classList.add('bg-green-100', 'text-green-800');
+            else if (currentFunction.type === 'Hybrid') funcType.classList.add('bg-purple-100', 'text-purple-800');
+            else if (currentFunction.type === 'Composition') funcType.classList.add('bg-orange-100', 'text-orange-800');
+        }
+
+        function generatePlot() {
+            loader.classList.remove('hidden');
+
+            // Use setTimeout to allow UI to update before heavy calc
+            setTimeout(() => {
+                const bounds = currentFunction.bounds;
+                const steps = 60; // Resolution
+                const xVals = [];
+                const yVals = [];
+                const zVals = [];
+
+                const stepSize = (bounds[1] - bounds[0]) / steps;
+
+                for (let i = 0; i <= steps; i++) {
+                    const x = bounds[0] + i * stepSize;
+                    xVals.push(x);
+                    const row = [];
+                    for (let j = 0; j <= steps; j++) {
+                        const y = bounds[0] + j * stepSize;
+                        if (i === 0) yVals.push(y);
+                        row.push(currentFunction.fn(x, y));
+                    }
+                    zVals.push(row);
+                }
+
+                const data = [{
+                    z: zVals,
+                    x: xVals,
+                    y: yVals,
+                    type: 'surface',
+                    colorscale: 'Viridis',
+                    contours: {
+                        z: {
+                            show: true,
+                            usecolormap: true,
+                            highlightcolor: "#42f5e9",
+                            project: { z: true }
+                        }
+                    }
+                }];
+
+                const layout = {
+                    autosize: true,
+                    margin: { l: 0, r: 0, b: 0, t: 0 },
+                    scene: {
+                        aspectmode: 'cube',
+                        xaxis: { title: 'x1' },
+                        yaxis: { title: 'x2' },
+                        zaxis: { title: 'f(x)' },
+                        camera: {
+                            eye: { x: 1.5, y: 1.5, z: 1.5 }
+                        }
+                    },
+                    paper_bgcolor: 'rgba(0,0,0,0)',
+                    plot_bgcolor: 'rgba(0,0,0,0)'
+                };
+
+                const config = { responsive: true, displayModeBar: false };
+
+                Plotly.newPlot('plotDiv', data, layout, config).then(() => {
+                    loader.classList.add('hidden');
+                });
+            }, 50);
+        }
+
+        // --- Event Listeners ---
+        menuBtn.onclick = () => {
+            const isClosed = sidebar.classList.contains('-translate-x-full');
+            if (isClosed) {
+                sidebar.classList.remove('-translate-x-full');
+                sidebar.classList.add('translate-x-0');
+            } else {
+                sidebar.classList.add('-translate-x-full');
+                sidebar.classList.remove('translate-x-0');
+            }
+        };
+
+        window.addEventListener('resize', () => {
+            Plotly.Plots.resize(plotDiv);
+        });
+
+        // --- Start ---
+        renderList();
+        selectFunction(functions[0]);
+
+    </script>
+</body>
+
+</html>
